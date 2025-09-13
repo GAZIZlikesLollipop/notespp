@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 
@@ -17,14 +19,60 @@ type Note struct {
 	Content string
 }
 
+func createNote(w http.ResponseWriter, r *http.Request) {
+	var note Note
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		fmt.Println("Ошибка чтения тела запроса: ", err)
+		w.Write([]byte("Ошибка чтения тела запроса"))
+		return
+	}
+	defer r.Body.Close()
+	if err := json.Unmarshal(body, &note); err != nil {
+		fmt.Println("Ошибка декодирвания тела запроса: ", err)
+		w.Write([]byte("Ошибка декодирвания тела запроса"))
+		return
+	}
+	if _, err := db.Exec(context.Background(), "INSERT INTO notes (name,content) VALUES (?,?)", note.Name, note.Content); err != nil {
+		fmt.Println("Ошибка создания заметки: ", err)
+		w.Write([]byte("Ошибка создания заметки"))
+		return
+	}
+	w.Write([]byte("Успешное создание заметки"))
+}
+
 func getNotes(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("ishlab ketdi!")
-	w.Write([]byte("HEllo bro"))
+	var notes []Note
+	rows, err := db.Query(context.Background(), "SELECT * FROM notes")
+	if err != nil {
+		fmt.Println("Ошибка чтения рядов: ", err)
+		w.Write([]byte("Ошибка чтения рядов"))
+		return
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var note Note
+		if err := rows.Scan(&note.Id, &note.Name, &note.Content); err != nil {
+			fmt.Println("Ошибка чтения рядa: ", err)
+			w.Write([]byte("Ошибка чтения рядa"))
+			return
+		}
+		notes = append(notes, note)
+	}
+
+	result, err := json.Marshal(notes)
+	if err != nil {
+		fmt.Println("Ошибка преобразования данных: ", err)
+		w.Write([]byte("Ошибка преобразования данных"))
+	}
+
+	w.Write([]byte(result))
 }
 
 func main() {
-	// url := "postgres://username:password@localhost:5432/database_name"
-	url := "postgres://postgres:@localhost:5432/notesdb"
+	url := "postgres://postgres:12345678@localhost:5432/notesdb"
 	var err error
 	db, err = pgx.Connect(context.Background(), url)
 	if err != nil {
@@ -34,6 +82,7 @@ func main() {
 	if err != nil {
 		log.Fatalln("Ошибка при созании таблицы: ", err)
 	}
+	http.HandleFunc("/create", createNote)
 	http.HandleFunc("/notes", getNotes)
 	if err = http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
