@@ -44,7 +44,7 @@ func createNote(w http.ResponseWriter, r *http.Request) {
 
 func getNote(w http.ResponseWriter, r *http.Request) {
 	var note Note
-	userId := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1 : len(r.URL.Path)]
+	userId := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 	row := db.QueryRow(context.Background(), "SELECT * FROM notes WHERE id=$1", userId)
 	if err := row.Scan(&note.Id, &note.Name, &note.Content); err != nil {
 		fmt.Println("Ошибка чтения заметки: ", err)
@@ -92,13 +92,61 @@ func getNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteNote(w http.ResponseWriter, r *http.Request) {
-	userId := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1 : len(r.URL.Path)]
+	userId := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 	if _, err := db.Exec(context.Background(), "DELETE FROM notes WHERE id = $1", userId); err != nil {
 		fmt.Println("Ошибка удаления записи: ", err)
 		w.Write([]byte("Ошибка удаления записи"))
 		return
 	}
 	w.Write([]byte("Успешное удаление заметки"))
+}
+
+func updateNote(w http.ResponseWriter, r *http.Request) {
+	var note Note
+	var reqStr string
+	var reqData []interface{}
+	userId := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		fmt.Println("Ошибка обнволвение записи: ", err)
+		w.Write([]byte("Ошибка обнволвение записи"))
+		return
+	}
+	if err := json.Unmarshal(body, &note); err != nil {
+		fmt.Println("Ошибка обнволвение записи: ", err)
+		w.Write([]byte("Ошибка обнволвение записи"))
+		return
+	}
+	if note.Name != "" {
+		reqStr += "name = $2,"
+		reqData = append(reqData, note.Name)
+	}
+	if note.Content != "" {
+		if note.Name != "" {
+			reqStr += " content = $3"
+		} else {
+			reqStr += " content = $2"
+		}
+		reqData = append(reqData, note.Content)
+	}
+	if len(reqData) < 1 {
+		w.Write([]byte("Ничего не обнвиолось"))
+		return
+	}
+	if len(reqData) > 1 {
+		if _, err := db.Exec(context.Background(), fmt.Sprintf("UPDATE notes SET %s WHERE id = $1", reqStr), userId, reqData[0], reqData[1]); err != nil {
+			fmt.Println("Ошибка обнволвение записи: ", err)
+			w.Write([]byte("Ошибка обнволвение записи"))
+			return
+		}
+	} else {
+		if _, err := db.Exec(context.Background(), fmt.Sprintf("UPDATE notes SET %s WHERE id = $1", reqStr), userId, reqData[0]); err != nil {
+			fmt.Println("Ошибка обнволвение записи: ", err)
+			w.Write([]byte("Ошибка обнволвение записи"))
+			return
+		}
+	}
+	w.Write([]byte("Успешное обновление заметки"))
 }
 
 func main() {
@@ -116,6 +164,7 @@ func main() {
 	http.HandleFunc("/notes", getNotes)
 	http.HandleFunc("/notes/", getNote)
 	http.HandleFunc("/delete/", deleteNote)
+	http.HandleFunc("/update/", updateNote)
 	if err = http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
 	}
